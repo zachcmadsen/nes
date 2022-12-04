@@ -5,3 +5,4 @@ mod ppu;
 
 pub use bus::NesBus;
 pub use cartridge::Cartridge;
+pub use ppu::Ppu;
