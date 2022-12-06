@@ -8,6 +8,7 @@ const HEADER_PREAMBLE: [u8; 4] = [0x4e, 0x45, 0x53, 0x1a];
 
 pub struct Cartridge {
     prg_rom: Vec<u8>,
+    chr_rom: Vec<u8>,
     prg_ram: Vec<u8>,
     mapper: Box<dyn Map>,
 }
@@ -34,6 +35,7 @@ impl Cartridge {
             panic!()
         }
 
+        // TODO: Handle nametable mirroring and the presence of a trainer.
         let mapper_number = data[7] & 0xf0 | data[6] >> 4;
         let mapper = match mapper_number {
             0 => Mapper0 {
@@ -43,7 +45,10 @@ impl Cartridge {
         };
 
         Cartridge {
-            prg_rom: data[16..(16 + prg_rom_len)].to_vec(),
+            prg_rom: data[HEADER_SIZE..(HEADER_SIZE + prg_rom_len)].to_vec(),
+            chr_rom: data[(HEADER_SIZE + prg_rom_len)
+                ..(HEADER_SIZE + prg_rom_len + chr_rom_len)]
+                .to_vec(),
             prg_ram: vec![0; prg_ram_len],
             mapper: Box::new(mapper),
         }

@@ -80,11 +80,33 @@ use self::address::Address;
 //     }
 // }
 
+const CONTROL_REGISTER_ADDRESS: u16 = 0x2000;
+const MASK_REGISTER_ADDRESS: u16 = 0x2001;
+const STATUS_REGISTER_ADDRESS: u16 = 0x2002;
+const OAM_ADDRESS_REGISTER_ADDRESS: u16 = 0x2003;
+const OAM_DATA_REGISTER_ADDRESS: u16 = 0x2004;
+const SCROLL_REGISTER_ADDRESS: u16 = 0x2005;
+const ADDRESS_REGISTER_ADDRESS: u16 = 0x2006;
+const DATA_REGISTER_ADDRESS: u16 = 0x2007;
+
 bitflags! {
     pub struct Status: u8 {
         const SPRITE_OVERFLOW = 0b0010_0000;
         const SPRITE_0_HIT = 0b0100_0000;
         const VBLANK = 0b1000_0000;
+    }
+}
+
+bitflags! {
+    pub struct Mask: u8 {
+        const GREYSCALE = 0b0000_0001;
+        const SHOW_BACKGROUND_LEFTMOST = 0b0000_0010;
+        const SHOW_SPRITES_LEFTMOST = 0b0000_0100;
+        const SHOW_BACKGROUND = 0b0000_1000;
+        const SHOW_SPRITES = 0b0001_0000;
+        const EMPHASIZE_RED = 0b0010_0000;
+        const EMPHASIZE_GREEN = 0b0100_0000;
+        const EMPHASIZE_BLUE = 0b1000_0000;
     }
 }
 
@@ -97,6 +119,7 @@ bitflags! {
 //     }
 // }
 
+#[derive(Clone, Copy)]
 struct Control(u8);
 
 impl Control {
@@ -111,17 +134,39 @@ impl Control {
     fn vram_address_increment(&self) -> u8 {
         self.0 & 0b0000_0100
     }
+
+    fn get_vram_address_increment(&self) -> u16 {
+        if self.vram_address_increment() == 0 {
+            1
+        } else {
+            32
+        }
+    }
+
+    fn generate_nmi(&self) -> u8 {
+        self.0 & 0b1000_0000
+    }
+
+    fn will_generate_nmi(&self) -> bool {
+        self.generate_nmi() != 0
+    }
 }
 
 pub struct Ppu {
     control: Control,
+    mask: Mask,
     status: Status,
+    oam_address: u8,
 
     temp_vram_address: Address,
     vram_address: Address,
+    fine_x_scroll: u8,
 
     latch: bool,
     io_bus: u8,
+
+    in_vblank: bool,
+    should_generate_nmi: bool,
 
     vram: [u8; 2048],
     palette: [u8; 32],
@@ -131,13 +176,18 @@ pub struct Ppu {
 impl Ppu {
     pub fn read(&mut self, address: u16) -> u8 {
         match address {
-            0x2002 => {
+            STATUS_REGISTER_ADDRESS => {
                 self.io_bus = self.status.bits() | (self.io_bus & 0x1f);
 
                 self.status.remove(Status::VBLANK);
                 self.latch = false;
             }
-            0x2007 => {}
+            OAM_DATA_REGISTER_ADDRESS => {
+                todo!()
+            }
+            DATA_REGISTER_ADDRESS => {
+                todo!()
+            }
             _ => (),
         }
 
@@ -150,32 +200,63 @@ impl Ppu {
         self.io_bus = data;
 
         match address {
-            0x2000 => {
+            CONTROL_REGISTER_ADDRESS => {
+                // TODO: Writes to the control register are ignored for about
+                // TODO: 30,000 cycles after power-up/reset.
+                let old_control = self.control;
                 self.control = Control::from_bits(data);
 
-                // Raise NMI in certain case.
+                if self.in_vblank
+                    && self.status.contains(Status::VBLANK)
+                    && !old_control.will_generate_nmi()
+                    && self.control.will_generate_nmi()
+                {
+                    self.should_generate_nmi = true;
+                }
 
-                self.temp_vram_address.set_nametable_select(
+                self.temp_vram_address.set_base_nametable_address(
                     self.control.base_nametable_address(),
                 );
             }
-            0x2005 => {
+            MASK_REGISTER_ADDRESS => {
+                self.mask = Mask::from_bits_truncate(data);
+            }
+            OAM_ADDRESS_REGISTER_ADDRESS => {
+                self.oam_address = data;
+            }
+            OAM_DATA_REGISTER_ADDRESS => {
+                todo!()
+            }
+            SCROLL_REGISTER_ADDRESS => {
                 if !self.latch {
+                    self.temp_vram_address.set_coarse_x_scroll(data);
+                    self.fine_x_scroll = data & 0b0000_0111;
                 } else {
+                    self.temp_vram_address.set_coarse_y_scroll(data);
+                    self.temp_vram_address.set_fine_y_scroll(data);
                 }
 
                 self.latch = !self.latch;
             }
-            0x2006 => {
-                if self.latch {
-                    self.temp_vram_address.set_low_byte(data);
-                    self.vram_address =
-                        Address::from_bits(self.temp_vram_address.bits());
-                } else {
+            ADDRESS_REGISTER_ADDRESS => {
+                if !self.latch {
                     self.temp_vram_address.set_high_byte(data);
+                } else {
+                    self.temp_vram_address.set_low_byte(data);
+                    self.vram_address = self.temp_vram_address;
                 }
 
                 self.latch = !self.latch;
+            }
+            DATA_REGISTER_ADDRESS => {
+                // TODO: Handle reads/writes during rendering. Only a couple
+                // TODO: games are known to read during rendering.
+                self.vram[self.vram_address.bits() as usize] = data;
+                // TODO: This is gross.
+                self.vram_address =
+                    Address::from_bits(self.vram_address.bits().wrapping_add(
+                        self.control.get_vram_address_increment(),
+                    ))
             }
             _ => (),
         }
