@@ -22,7 +22,7 @@ impl NesBus {
             0x0000..=0x1fff => self.ram[(pins.address & 0x07ff) as usize],
             0x2000..=0x3fff => unimplemented!("PPU registers"),
             0x4000..=0x401f => unimplemented!("APU and IO registers"),
-            0x4020..=0xffff => self.cartridge.read_byte(pins.address),
+            0x4020..=0xffff => self.cartridge.read_prg(pins.address),
         }
     }
 
@@ -34,7 +34,7 @@ impl NesBus {
             0x2000..=0x3fff => unimplemented!("PPU registers"),
             0x4000..=0x401f => (),
             0x4020..=0xffff => {
-                self.cartridge.write_byte(pins.address, pins.data)
+                self.cartridge.write_prg(pins.address, pins.data)
             }
         }
     }

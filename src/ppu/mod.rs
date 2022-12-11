@@ -59,6 +59,8 @@ mod address;
 
 use bitflags::bitflags;
 
+use crate::{Cartridge, Mirroring};
+
 use self::address::Address;
 
 // bitflags! {
@@ -168,13 +170,64 @@ pub struct Ppu {
     in_vblank: bool,
     should_generate_nmi: bool,
 
+    // 1kb is 1024
     vram: [u8; 2048],
+    vram_buffer: u8,
     palette: [u8; 32],
     oam: [u8; 256],
+
+    cartridge: Cartridge,
 }
 
+const NAMETABLE_MIRROR_LUT: [u8; 8] = [0, 0, 1, 1, 0, 1, 0, 1];
+
 impl Ppu {
-    pub fn read(&mut self, address: u16) -> u8 {
+    fn read(&mut self, address: u16) -> u8 {
+        match address {
+            0x0000..=0x1fff => self.cartridge.read_chr(address),
+            0x2000..=0x3eff => {
+                self.vram[self.get_mirror_vram_address(address) as usize]
+            }
+            0x3f00..=0x3fff => self.palette[address as usize],
+            _ => unreachable!(),
+        }
+    }
+
+    fn get_mirror_vram_address(&mut self, address: u16) -> u16 {
+        const NAMETABLE_SIZE: u16 = 0x400;
+        // 0x3000 - 0x3eff is usually a mirror of 0x2000 - 0x2eff.
+        let address = address & 0x2eff;
+        let offset = address % 0x2000;
+        let nametable_index = address / NAMETABLE_SIZE;
+        let mirroring = self.cartridge.mirroring as u8;
+
+        NAMETABLE_MIRROR_LUT[(mirroring * 4 + nametable_index as u8) as usize]
+            as u16
+            * NAMETABLE_SIZE
+            + offset
+    }
+
+    pub fn vram_read(&mut self, address: u16) -> u8 {
+        let result = match address {
+            0x0000..=0x3fff => {
+                let value = self.vram_buffer;
+                self.vram_buffer =
+                    self.vram[self.vram_address.bits() as usize];
+                value
+            }
+            _ => self.vram[self.vram_address.bits() as usize],
+        };
+
+        self.vram_address = Address::from_bits(
+            self.vram_address
+                .bits()
+                .wrapping_add(self.control.get_vram_address_increment()),
+        );
+
+        result
+    }
+
+    pub fn read_register(&mut self, address: u16) -> u8 {
         match address {
             STATUS_REGISTER_ADDRESS => {
                 self.io_bus = self.status.bits() | (self.io_bus & 0x1f);
@@ -185,9 +238,7 @@ impl Ppu {
             OAM_DATA_REGISTER_ADDRESS => {
                 todo!()
             }
-            DATA_REGISTER_ADDRESS => {
-                todo!()
-            }
+            DATA_REGISTER_ADDRESS => self.io_bus = self.vram_read(address),
             _ => (),
         }
 
@@ -195,7 +246,7 @@ impl Ppu {
         self.io_bus
     }
 
-    pub fn write(&mut self, address: u16, data: u8) {
+    pub fn write_register(&mut self, address: u16, data: u8) {
         // Writing to any PPU register loads a value into the I/O bus.
         self.io_bus = data;
 
@@ -256,7 +307,7 @@ impl Ppu {
                 self.vram_address =
                     Address::from_bits(self.vram_address.bits().wrapping_add(
                         self.control.get_vram_address_increment(),
-                    ))
+                    ));
             }
             _ => (),
         }

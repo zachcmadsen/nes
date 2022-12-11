@@ -6,11 +6,19 @@ const CHR_ROM_BANK_SIZE: usize = 0x2000;
 const PRG_RAM_BANK_SIZE: usize = 0x2000;
 const HEADER_PREAMBLE: [u8; 4] = [0x4e, 0x45, 0x53, 0x1a];
 
+#[derive(Clone, Copy)]
+#[repr(u8)]
+pub enum Mirroring {
+    Horizontal = 0,
+    Vertical,
+}
+
 pub struct Cartridge {
     prg_rom: Vec<u8>,
     chr_rom: Vec<u8>,
     prg_ram: Vec<u8>,
-    mapper: Box<dyn Map>,
+    pub mirroring: Mirroring,
+    // mapper: Box<dyn Map>,
 }
 
 impl Cartridge {
@@ -50,22 +58,37 @@ impl Cartridge {
                 ..(HEADER_SIZE + prg_rom_len + chr_rom_len)]
                 .to_vec(),
             prg_ram: vec![0; prg_ram_len],
-            mapper: Box::new(mapper),
+            mirroring: Mirroring::Horizontal,
         }
     }
 
-    pub fn read_byte(&mut self, address: u16) -> u8 {
-        let mapped_address = self.mapper.map(address);
-        self.prg_rom[mapped_address as usize]
+    pub fn read_chr(&mut self, address: u16) -> u8 {
+        self.chr_rom[address as usize]
     }
 
-    pub fn write_byte(&mut self, address: u16, data: u8) {
-        let mapped_address = self.mapper.map(address);
-        match mapped_address {
+    pub fn write_chr(&mut self, address: u16, data: u8) {
+        todo!();
+    }
+
+    pub fn read_prg(&mut self, address: u16) -> u8 {
+        match address {
             0x6000..=0x7fff => {
-                self.prg_ram[mapped_address as usize] = data;
+                self.prg_ram[(address - 0x6000) as usize % self.prg_ram.len()]
             }
-            _ => panic!("can't write to ROM"),
+            0x8000..=0xffff => {
+                self.prg_rom[(address - 0x8000) as usize % self.prg_rom.len()]
+            }
+            _ => unreachable!(),
+        }
+    }
+
+    pub fn write_prg(&mut self, address: u16, data: u8) {
+        match address {
+            0x6000..=0x7fff => {
+                let address = (address - 0x6000) as usize % self.prg_ram.len();
+                self.prg_ram[address] = data;
+            }
+            _ => unreachable!(),
         }
     }
 }
