@@ -1,40 +1,46 @@
 use bog::{Bus, Pins};
 
-use crate::Cartridge;
+use crate::NromCartridge;
 
 const NES_RAM_SIZE: usize = 0x0800;
 
 pub struct NesBus {
     ram: [u8; NES_RAM_SIZE],
-    cartridge: Cartridge,
+    pub cartridge: NromCartridge,
 }
 
 impl NesBus {
-    pub fn new(cartridge: Cartridge) -> NesBus {
+    pub fn new(cartridge: NromCartridge) -> NesBus {
         NesBus {
             ram: [0; NES_RAM_SIZE],
             cartridge,
         }
     }
 
-    fn read_byte(&mut self, pins: &mut Pins) {
-        pins.data = match pins.address {
-            0x0000..=0x1fff => self.ram[(pins.address & 0x07ff) as usize],
-            0x2000..=0x3fff => unimplemented!("PPU registers"),
-            0x4000..=0x401f => unimplemented!("APU and IO registers"),
-            0x4020..=0xffff => self.cartridge.read_byte(pins.address),
+    fn read(&mut self, pins: &mut Pins) {
+        // TODO: Rewrite as pins.data = match pins.address { ... } once the
+        // other match arms are implemented.
+        match pins.address {
+            0x0000..=0x1fff => {
+                pins.data = self.ram[(pins.address & 0x07ff) as usize]
+            }
+            0x2000..=0x3fff => (),
+            0x4000..=0x401f => (),
+            0x4020..=0xffff => {
+                pins.data = self.cartridge.read_prg(pins.address)
+            }
         }
     }
 
-    fn write_byte(&mut self, pins: &mut Pins) {
+    fn write(&mut self, pins: &mut Pins) {
         match pins.address {
             0x0000..=0x1fff => {
                 self.ram[(pins.address & 0x07ff) as usize] = pins.data
             }
-            0x2000..=0x3fff => unimplemented!("PPU registers"),
+            0x2000..=0x3fff => (),
             0x4000..=0x401f => (),
             0x4020..=0xffff => {
-                self.cartridge.write_byte(pins.address, pins.data)
+                self.cartridge.write_prg(pins.address, pins.data)
             }
         }
     }
@@ -43,8 +49,8 @@ impl NesBus {
 impl Bus for NesBus {
     fn tick(&mut self, pins: &mut Pins) {
         match pins.rw {
-            true => self.read_byte(pins),
-            false => self.write_byte(pins),
+            true => self.read(pins),
+            false => self.write(pins),
         }
     }
 }
