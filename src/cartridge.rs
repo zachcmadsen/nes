@@ -1,66 +1,53 @@
-use crate::mapper::{Map, Mapper0};
-
-const HEADER_SIZE: usize = 16;
-const PRG_ROM_BANK_SIZE: usize = 0x4000;
-const CHR_ROM_BANK_SIZE: usize = 0x2000;
-const PRG_RAM_BANK_SIZE: usize = 0x2000;
-const HEADER_PREAMBLE: [u8; 4] = [0x4e, 0x45, 0x53, 0x1a];
-
-pub struct Cartridge {
-    prg_rom: Vec<u8>,
+pub struct NromCartridge {
     prg_ram: Vec<u8>,
-    mapper: Box<dyn Map>,
+    prg_rom: Vec<u8>,
 }
 
-impl Cartridge {
-    pub fn new(data: &[u8]) -> Cartridge {
-        if data.len() < HEADER_SIZE {
-            panic!()
+impl NromCartridge {
+    pub fn new(rom: &[u8]) -> NromCartridge {
+        // TODO: Completely parse the iNES header. Many values are currently
+        // ignored.
+        let (header, data) = rom.split_at(16);
+
+        let mapper_number = header[7] & 0xf0 | header[6] >> 4;
+        if mapper_number != 0 {
+            panic!("only NROM is supported")
         }
 
-        if data[0..=3] != HEADER_PREAMBLE {
-            panic!("invalid header preamble")
-        }
+        let num_prg_rom_banks = header[4];
+        let num_prg_ram_banks =
+            if header[8] == 0 { 1 } else { header[8] } as usize;
 
-        let num_prg_rom_banks = data[4];
-        let num_chr_rom_banks = data[5];
-        let num_prg_ram_banks = data[8];
+        const PRG_ROM_BANK_SIZE: usize = 0x4000;
+        const PRG_RAM_BANK_SIZE: usize = 0x2000;
+        let prg_ram_size = num_prg_ram_banks as usize * PRG_RAM_BANK_SIZE;
+        let prg_rom_size = num_prg_rom_banks as usize * PRG_ROM_BANK_SIZE;
 
-        let prg_rom_len = num_prg_rom_banks as usize * PRG_ROM_BANK_SIZE;
-        let chr_rom_len = num_chr_rom_banks as usize * CHR_ROM_BANK_SIZE;
-        let prg_ram_len = num_prg_ram_banks as usize * PRG_RAM_BANK_SIZE;
-
-        if data.len() < HEADER_SIZE + prg_rom_len + chr_rom_len + prg_ram_len {
-            panic!()
-        }
-
-        let mapper_number = data[7] & 0xf0 | data[6] >> 4;
-        let mapper = match mapper_number {
-            0 => Mapper0 {
-                has_one_bank: num_prg_rom_banks == 1,
-            },
-            _ => unimplemented!(),
-        };
-
-        Cartridge {
-            prg_rom: data[16..(16 + prg_rom_len)].to_vec(),
-            prg_ram: vec![0; prg_ram_len],
-            mapper: Box::new(mapper),
+        NromCartridge {
+            prg_ram: vec![0; prg_ram_size],
+            prg_rom: data[..prg_rom_size].to_vec(),
         }
     }
 
-    pub fn read_byte(&mut self, address: u16) -> u8 {
-        let mapped_address = self.mapper.map(address);
-        self.prg_rom[mapped_address as usize]
-    }
-
-    pub fn write_byte(&mut self, address: u16, data: u8) {
-        let mapped_address = self.mapper.map(address);
-        match mapped_address {
+    pub fn read_prg(&mut self, address: u16) -> u8 {
+        match address {
             0x6000..=0x7fff => {
-                self.prg_ram[mapped_address as usize] = data;
+                self.prg_ram[(address - 0x6000) as usize % self.prg_ram.len()]
             }
-            _ => panic!("can't write to ROM"),
+            0x8000..=0xffff => {
+                self.prg_rom[(address - 0x8000) as usize % self.prg_rom.len()]
+            }
+            _ => unreachable!(),
+        }
+    }
+
+    pub fn write_prg(&mut self, address: u16, data: u8) {
+        match address {
+            0x6000..=0x7fff => {
+                let address = (address - 0x6000) as usize % self.prg_ram.len();
+                self.prg_ram[address] = data;
+            }
+            _ => unreachable!(),
         }
     }
 }
