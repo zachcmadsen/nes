@@ -5,6 +5,7 @@ edition = "2021"
 
 [dependencies]
 bog = { git = "https://github.com/zachcmadsen/bog" }
+cpal = "0.14"
 
 [dev-dependencies]
 bincode = "2.0.0-rc.2"
